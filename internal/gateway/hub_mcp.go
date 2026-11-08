@@ -99,6 +99,26 @@ const (
 // or LocalCaller.
 func CallerName(c HubCaller) string { return cmp.Or(c.Key, LocalCaller) }
 
+// CallerLabel is the caller a usage row of a router call was made by, as a
+// server that asked for it is told (CallerName): the name of the gateway key
+// (keyID, keyName as the row recorded them), or LocalCaller for a row with
+// no key.
+func CallerLabel(keyID, keyName string) string {
+	return CallerName(HubCaller{Key: callerKeyName(access.Identity{KeyID: keyID, KeyName: keyName})})
+}
+
+// HubToolNames are the names the router gives ts, in order, as an agent
+// lists them (hubNamed): <server>__<tool> in the characters MCP clients
+// take, a name two would share told apart by a number.
+func HubToolNames(ts []HubTool) []string {
+	named := hubNamed(ts)
+	out := make([]string, len(named))
+	for i, t := range named {
+		out[i] = t.name
+	}
+	return out
+}
+
 // maxCallerName is the longest key name passed on, in bytes.
 const maxCallerName = 128
 

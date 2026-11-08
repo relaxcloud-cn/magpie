@@ -555,6 +555,10 @@ type backend struct {
 	busy    int
 	idle    *time.Timer
 	stopped bool
+	// fail is why the last list or call didn't get an answer, nil once one
+	// did; listedAt is when the tools were last listed (the router view)
+	fail     error
+	listedAt time.Time
 }
 
 var errHubStopped = errors.New("magpie stopped it")
@@ -615,7 +619,7 @@ func (b *backend) start(ready chan struct{}) {
 	}
 	b.conn, b.err, b.ready = c, err, nil
 	if c != nil {
-		b.says = c.said()
+		b.says, b.fail = c.said(), nil
 	}
 	close(ready)
 }
@@ -687,6 +691,23 @@ func (b *backend) stop() {
 
 // tools are the tools the server lists, every page of them.
 func (b *backend) tools(ctx context.Context) ([]map[string]json.RawMessage, error) {
+	ts, err := b.listTools(ctx)
+	b.failed(err)
+	return ts, err
+}
+
+// failed keeps why a list or call got no answer for the router view; a
+// caller that went away, or the hub ending the server, is no failure of it.
+func (b *backend) failed(err error) {
+	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, errHubStopped) {
+		return
+	}
+	b.mu.Lock()
+	b.fail = err
+	b.mu.Unlock()
+}
+
+func (b *backend) listTools(ctx context.Context) ([]map[string]json.RawMessage, error) {
 	b.use()
 	defer b.done()
 	b.mu.Lock()
@@ -731,7 +752,7 @@ func (b *backend) tools(ctx context.Context) ([]map[string]json.RawMessage, erro
 		cursor = r.NextCursor
 	}
 	b.mu.Lock()
-	b.list, b.listed = all, true
+	b.list, b.listed, b.listedAt, b.fail = all, true, time.Now(), nil
 	b.mu.Unlock()
 	return all, nil
 }
@@ -740,6 +761,17 @@ func (b *backend) tools(ctx context.Context) ([]map[string]json.RawMessage, erro
 // result as the server gave it. A non-empty told is the caller the server
 // is told of in CallerHeader, on the requests the call makes.
 func (b *backend) call(ctx context.Context, tool string, args json.RawMessage, meta map[string]any, told string) (json.RawMessage, error) {
+	res, err := b.callTool(ctx, tool, args, meta, told)
+	b.failed(err)
+	if err == nil {
+		b.mu.Lock()
+		b.fail = nil
+		b.mu.Unlock()
+	}
+	return res, err
+}
+
+func (b *backend) callTool(ctx context.Context, tool string, args json.RawMessage, meta map[string]any, told string) (json.RawMessage, error) {
 	b.use()
 	defer b.done()
 	c, err := b.connect(ctx)
