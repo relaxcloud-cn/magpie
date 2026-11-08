@@ -9,7 +9,7 @@ import (
 
 // ServerOpts are the settings a server takes beside its command or URL,
 // typed as key=value words on the command line (#6111, Abandon332 on X):
-// header=K=V (or K: V), env=K=V, timeout=SECS, agents=a,b, --local. A word
+// header=K=V (or K: V), env=K=V, timeout=SECS, agents=a,b, --local, --caller. A word
 // the line means as the child's own argument comes after "--".
 type ServerOpts struct {
 	Headers  map[string]string
@@ -20,6 +20,7 @@ type ServerOpts struct {
 	Agents   []string // the words of agents=, for the caller to resolve
 	HasAgent bool
 	Local    *bool
+	Caller   *bool
 }
 
 // optionNames are the words that, as key=value, are never a child's
@@ -46,6 +47,11 @@ func SplitServerWords(words []string) (cmd []string, o ServerOpts, err error) {
 		if w == "--local" {
 			t := true
 			o.Local = &t
+			continue
+		}
+		if w == "--caller" {
+			t := true
+			o.Caller = &t
 			continue
 		}
 		k, v, ok := strings.Cut(w, "=")
@@ -123,6 +129,9 @@ func envPair(v string) (string, string, error) {
 // header on a command, or an env on a URL, is an error rather than
 // dropped.
 func (o ServerOpts) Apply(s *Server) error {
+	if o.Caller != nil && *o.Caller && !s.Remote() {
+		return fmt.Errorf("--caller is for a URL server: the router sends the header over HTTP, and %s runs as a command", s.Name)
+	}
 	if (len(o.Headers) > 0 || len(o.NoHeader) > 0) && !s.Remote() {
 		return fmt.Errorf("%s: header= is for a server by URL; a command takes env=", s.Name)
 	}
@@ -168,6 +177,9 @@ func (o ServerOpts) Apply(s *Server) error {
 	}
 	if o.Local != nil {
 		s.Local = *o.Local
+	}
+	if o.Caller != nil {
+		s.Caller = *o.Caller
 	}
 	return nil
 }
