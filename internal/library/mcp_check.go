@@ -929,6 +929,7 @@ func (c *httpSession) post(ctx context.Context, body []byte) (*http.Response, er
 	c.mu.Unlock()
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
+	setCaller(ctx, req)
 	if session != "" {
 		req.Header.Set("Mcp-Session-Id", session)
 		req.Header.Set("MCP-Protocol-Version", version)

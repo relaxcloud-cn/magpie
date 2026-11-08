@@ -104,6 +104,23 @@ func ServerHub(name string, direct bool) (*Result, error) {
 	})
 }
 
+// ServerCaller has the router tell a URL server who is calling it
+// (Server.Caller), or stops. The agents' entries are as they were: only
+// the router sends the header.
+func ServerCaller(name string, on bool) (*Result, error) {
+	return change(func(l *Library) error {
+		s := l.server(name)
+		if s == nil {
+			return fmt.Errorf("no server called %s", name)
+		}
+		if on && !s.Remote() {
+			return fmt.Errorf("%s: only a URL server is told who calls it; this one runs as a command", name)
+		}
+		s.Caller = on
+		return nil
+	})
+}
+
 // hubServerFor is the entry agent t is given for the hub, at the address
 // the agent reaches the gateway at, with a key when it reaches it from
 // another machine (a WSL distro under NAT, a computer on the LAN).
@@ -367,7 +384,11 @@ func (theHub) Call(ctx context.Context, agentID, server, tool string, args json.
 	if s.Plugin != "" {
 		return pluginHubCall(ctx, gateway.HubAgentOf(agentID), s, tool, args)
 	}
-	return backendOf(s).call(ctx, tool, args, meta)
+	var told string
+	if s.Caller {
+		told = gateway.CallerName(gateway.HubCallerOf(ctx))
+	}
+	return backendOf(s).call(ctx, tool, args, meta, told)
 }
 
 // keepsSession is whether s is told which of the hub's callers a call is
@@ -381,6 +402,27 @@ func keepsSession(s *Server) bool {
 		return err == nil && strings.HasPrefix(u.Path, gateway.HubMCPAll)
 	}
 	return len(s.Args) >= 2 && s.Args[0] == "mcp" && s.Args[1] == "browser"
+}
+
+type callerKey struct{}
+
+// callerCtx is ctx for the requests of a call made on behalf of the
+// caller named who (Server.Caller): setCaller puts it on them as
+// gateway.CallerHeader. The name comes from the gateway key the call was
+// authorized with (gateway.HubCaller.Key), never from a header the caller
+// sent: the hub builds each request's headers from the server's own.
+func callerCtx(ctx context.Context, who string) context.Context {
+	return context.WithValue(ctx, callerKey{}, who)
+}
+
+// setCaller puts the caller ctx carries on req as gateway.CallerHeader,
+// over any header of that name the server's own headers have; a ctx that
+// carries none (a list, a check, a server that didn't ask) leaves req as
+// it is.
+func setCaller(ctx context.Context, req *http.Request) {
+	if who, _ := ctx.Value(callerKey{}).(string); who != "" {
+		req.Header.Set(gateway.CallerHeader, who)
+	}
 }
 
 // imageMeta is the _meta a call of magpie's image or memory server is
@@ -695,8 +737,9 @@ func (b *backend) tools(ctx context.Context) ([]map[string]json.RawMessage, erro
 }
 
 // call runs one tool, with meta as its _meta when there is one, and is its
-// result as the server gave it.
-func (b *backend) call(ctx context.Context, tool string, args json.RawMessage, meta map[string]any) (json.RawMessage, error) {
+// result as the server gave it. A non-empty told is the caller the server
+// is told of in CallerHeader, on the requests the call makes.
+func (b *backend) call(ctx context.Context, tool string, args json.RawMessage, meta map[string]any, told string) (json.RawMessage, error) {
 	b.use()
 	defer b.done()
 	c, err := b.connect(ctx)
@@ -706,6 +749,9 @@ func (b *backend) call(ctx context.Context, tool string, args json.RawMessage, m
 	params := map[string]any{"name": tool, "arguments": args}
 	if meta != nil {
 		params["_meta"] = meta
+	}
+	if told != "" {
+		ctx = callerCtx(ctx, told)
 	}
 	m, err := c.ask(ctx, "tools/call", params)
 	if err != nil {
@@ -1046,6 +1092,7 @@ func dialSSE(ctx context.Context, s *Server, changed func()) (*streamConn, error
 			req.Header[k] = v
 		}
 		req.Header.Set("Content-Type", "application/json")
+		setCaller(ctx, req)
 		res, err := checkClient.Do(req)
 		if err != nil {
 			return healthErr(netHealth(ctx, err))

@@ -20,7 +20,7 @@ const libraryUsage = `magpie library                     what the library gives 
   magpie library instructions        print the shared instructions
   magpie library instructions set <file|->   replace them with a file's text (- for stdin)
   magpie library instructions agents <a,b…|none>   the agents that get them
-  magpie library mcp add <name> <url | command args…> [agents=a,b…] [header=K=V…] [env=K=V…] [timeout=SECS] [--local]
+  magpie library mcp add <name> <url | command args…> [agents=a,b…] [header=K=V…] [env=K=V…] [timeout=SECS] [--local] [--caller]
                                      header= is for a URL, env= for a command; the program's own words go after --
   magpie library mcp set <name> header=K=V | header-=K | env=K=V | env-=K | timeout=SECS   change one setting of a server
   magpie library mcp show <name>     print the server as the library keeps it, as JSON
@@ -29,6 +29,8 @@ const libraryUsage = `magpie library                     what the library gives 
                                      coming in neither takes it away nor puts another computer's in its place
   magpie library mcp here <name> <command args…> | off   start a synced server with this command on this computer alone,
                                      the others keeping the synced one (its name, agents and note still sync); off goes back to it
+  magpie library mcp caller <name> on|off   with the router on, tell a URL server who is calling: every call the router passes on
+                                     carries X-Magpie-Caller, the name of the gateway key that made it (local for a local call with none)
   magpie library mcp off|on <name>   take it from every agent, project and app, keeping its settings; on gives it back as it was
   magpie library mcp rm <name>
   magpie library mcp router on|off   give each agent one MCP server, magpie, in place of the library's (magpie runs them, once for every agent)
@@ -149,7 +151,7 @@ func libraryCmd(args []string) error {
 			if cmd, o, err = library.SplitServerWords(rest[2:]); err != nil {
 				return err
 			}
-			if len(cmd) > 0 || o.HasAgent || o.Local != nil {
+			if len(cmd) > 0 || o.HasAgent || o.Local != nil || o.Caller != nil {
 				return fmt.Errorf("set takes header=K=V, env=K=V, header-=K, env-=K and timeout=SECS, not %q", strings.Join(cmd, " "))
 			}
 			res, err = library.SetServer(rest[1], o)
@@ -171,6 +173,9 @@ func libraryCmd(args []string) error {
 			if as, err = libraryAgents(rest[2], "mcp"); err == nil {
 				res, err = library.ServerAgents(rest[1], as)
 			}
+		case len(rest) == 3 && rest[0] == "caller" && (rest[2] == "on" || rest[2] == "off") && !strings.HasPrefix(rest[1], "-"):
+			// a URL server told who calls it through the router
+			res, err = library.ServerCaller(rest[1], rest[2] == "on")
 		case len(rest) == 3 && rest[0] == "local" && (rest[2] == "on" || rest[2] == "off") && !strings.HasPrefix(rest[1], "-"):
 			if res, err = library.ServerLocal(rest[1], rest[2] == "on"); err == nil && len(res.Changed) == 0 && len(res.Problems) == 0 {
 				if rest[2] == "on" {
@@ -544,6 +549,9 @@ func libraryStatus() error {
 		}
 		if s.Hub == library.HubDirect {
 			fmt.Println("   ", muted.Render("direct: each agent's own entry, never through the hub · magpie library mcp hub "+s.Name+" shared"))
+		}
+		if s.Caller {
+			fmt.Println("   ", muted.Render("told who calls it: the router sends X-Magpie-Caller with each call · magpie library mcp caller "+s.Name+" off"))
 		}
 		for a, e := range s.Problems {
 			fmt.Println("   ", amber.Render("!"), a, muted.Render(e))

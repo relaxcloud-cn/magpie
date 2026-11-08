@@ -87,6 +87,14 @@ type Server struct {
 	// off, for a server that reads its project from the folder it is
 	// started in, or keeps a session's state (#4382, cuipengcx90).
 	Hub string `json:"hub,omitempty"`
+	// Caller makes the MCP router tell the server who is calling: every
+	// call it passes on carries gateway.CallerHeader, the name of the
+	// gateway key that made the call (gateway.LocalCaller for a local one
+	// with none), for a server that records or limits its callers
+	// (callerCtx, mcp_hub.go). Off, the default, the server is sent
+	// nothing of the sort. Only a URL server takes it, and only the router
+	// sends it: an agent given the server's own entry never does.
+	Caller bool `json:"caller,omitempty"`
 	// Note is the user's own word on what the server is for (youyo.p on
 	// Discord: with many of them, which is which). Only the library keeps
 	// it, and a sync carries it; no agent is given it (TestNoteNeverGiven).
@@ -151,7 +159,7 @@ func (s *Server) check() error {
 			return fmt.Errorf("%s: a command is needed", s.Name)
 		}
 		s.Command, s.Args = spacedProgram(s.Command, s.Args)
-		s.URL, s.Headers = "", nil
+		s.URL, s.Headers, s.Caller = "", nil, false
 	case "http", "sse":
 		if !strings.HasPrefix(s.URL, "http://") && !strings.HasPrefix(s.URL, "https://") {
 			return fmt.Errorf("%s: the URL has to start with http:// or https://", s.Name)

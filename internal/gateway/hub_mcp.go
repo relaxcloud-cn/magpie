@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/json"
@@ -12,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/yetone/magpie/internal/access"
 	"github.com/yetone/magpie/internal/sessions"
@@ -76,6 +79,50 @@ type HubCaller struct {
 	Roots   []string
 	Client  string
 	Session string
+	// Key is the name of the gateway key the call was authorized with
+	// (callerKeyName), "" for a local call with none. It is what a server
+	// that asked for it (Server.Caller) is told in CallerHeader, and it is
+	// never read from a header the caller sent.
+	Key string
+}
+
+// CallerHeader is the header the hub puts on a call it passes to a Library
+// server that asked for it (Server.Caller): the name of the gateway key
+// that made the call, or LocalCaller for a local one with none. It is the
+// hub's alone: nothing a caller sends is passed on under it.
+const (
+	CallerHeader = "X-Magpie-Caller"
+	LocalCaller  = "local"
+)
+
+// CallerName is what a server is told of the caller of c: its key's name,
+// or LocalCaller.
+func CallerName(c HubCaller) string { return cmp.Or(c.Key, LocalCaller) }
+
+// maxCallerName is the longest key name passed on, in bytes.
+const maxCallerName = 128
+
+// callerKeyName is who's key as the hub's servers are told of it: its name
+// as one header value (a control character a space, cut at maxCallerName
+// bytes on a character), its id when the name leaves nothing, "" for a
+// call with no key.
+func callerKeyName(who access.Identity) string {
+	if who.KeyID == "" {
+		return ""
+	}
+	name := strings.TrimSpace(strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, strings.ToValidUTF8(who.KeyName, "")))
+	if len(name) > maxCallerName {
+		name = name[:maxCallerName]
+		for !utf8.ValidString(name) {
+			name = name[:len(name)-1]
+		}
+	}
+	return cmp.Or(strings.TrimSpace(name), who.KeyID)
 }
 
 // The _meta keys a call of magpie's image server carries its caller in:
@@ -747,10 +794,11 @@ func hubToolNamed(ctx context.Context, ts []hubTool, agent, name string) (hubToo
 	return found[0], true
 }
 
-// hubCall runs t for the caller r is: its session, and for a tool that
+// hubCall runs t for the caller r is: its session, its gateway key (what
+// a server that asks for it is told, CallerHeader), and for a tool that
 // reads them, its workspaces and client (HubCaller).
 func (s *Server) hubCall(r *http.Request, agent string, t hubTool, args json.RawMessage, meta hubCallMeta) any {
-	c := HubCaller{Session: hubSession(r, agent, meta)}
+	c := HubCaller{Session: hubSession(r, agent, meta), Key: callerKeyName(access.Caller(r.Context()))}
 	if v := hubVisitor(r); v.Away && v.Key != "" {
 		// its browser is its key's, whatever session it names (browser.go)
 		c.Session = keyedSession(v.Key, c.Session)
