@@ -379,6 +379,7 @@ var notYet = map[string]string{
 	"GET /api/library/market/pi":                 L,  // library.go
 	"GET /api/library/mcp-signin/{id}":           L,  // library.go
 	"GET /api/library/pi":                        L,  // library.go
+	"GET /api/library/router":                    L,  // library_router.go: the router's servers, tools and calls, read-only
 	"GET /api/library/rtk":                       L,  // library.go
 	"GET /api/library/skill":                     L,  // library.go
 	"POST /api/library/bili":                     L,  // library.go

@@ -178,6 +178,7 @@ func libraryRoutes(mux *http.ServeMux, w Windows) {
 	memoryRoutes(mux)
 	memoryDistillRoutes(mux)
 	memorySemanticRoutes(mux)
+	routerRoutes(mux)
 	mux.HandleFunc("GET /api/library", func(rw http.ResponseWriter, r *http.Request) {
 		v, err := libraryRead(nil, r.URL.Query().Get("glance") == "1")
 		if err != nil {

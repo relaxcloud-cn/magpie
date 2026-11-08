@@ -18,6 +18,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/yetone/magpie/internal/gateway"
 	"github.com/yetone/magpie/internal/settings"
@@ -30,6 +31,9 @@ type hubCard struct {
 	Title string `json:"title,omitempty"`
 	Says  string `json:"says,omitempty"`
 	Tools []Tool `json:"tools"`
+	// At is when the card last changed: the tools it lists were learnt
+	// then (a list that came back the same leaves it, nothing is written)
+	At time.Time `json:"at,omitzero"`
 }
 
 // What a card keeps: a title and the server's own words cut short, at most
@@ -118,7 +122,7 @@ func cardOf(s *Server) *hubCard {
 // file only when it changed; the cards of servers the library no longer
 // has go with it.
 func noteCard(s *Server, says serverSays, ts []map[string]json.RawMessage) {
-	c := hubCard{Key: cardKey(s), Title: says.Title, Says: says.Says, Tools: []Tool{}}
+	c := hubCard{Key: cardKey(s), Title: says.Title, Says: says.Says, Tools: []Tool{}, At: time.Now().UTC().Truncate(time.Second)}
 	for _, t := range ts {
 		var name, desc string
 		if json.Unmarshal(t["name"], &name) != nil || name == "" {
